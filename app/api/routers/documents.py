@@ -3,8 +3,9 @@ Document API endpoints
 """
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from typing import List
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_document_service, get_ingestion_service, get_current_user_id, get_current_tenant_id
+from app.api.deps import get_document_service, get_ingestion_service, get_current_user_id, get_current_tenant_id, get_db
 from app.services.document_service import DocumentService
 from app.services.ingestion_service import IngestionService
 from app.schemas.documents import (
@@ -24,8 +25,7 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 async def upload_document(
     file: UploadFile = File(...),
     doc_service: DocumentService = Depends(get_document_service),
-    ingestion_service: IngestionService = Depends(get_ingestion_service),
-    user_id: str = Depends(get_current_user_id),
+    ingestion_service: IngestionService = Depends(get_ingestion_service),    db: AsyncSession = Depends(get_db),  # Direct session access for commit    user_id: str = Depends(get_current_user_id),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """Upload a PDF document and auto-trigger knowledge extraction pipeline"""
@@ -51,6 +51,11 @@ async def upload_document(
                 user_id=user_id,
                 tenant_id=tenant_id
             )
+            
+            # IMPORTANT: Commit DB before submitting to queue
+            # This ensures Celery worker can find the job record
+            await db.commit()
+            logger.info("job_committed_to_db", job_id=job.id)
             
             # Submit to queue (Celery)
             task_id = ingestion_service.submit_to_queue(job.id, tenant_id)

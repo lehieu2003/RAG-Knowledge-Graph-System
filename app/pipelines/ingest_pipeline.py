@@ -78,7 +78,18 @@ def run_full_pipeline(job_id: str, tenant_id: str) -> Dict[str, Any]:
             kg_service = KGService(kg_repo)
             
             # Get job
-            job = await ingestion_service.get_job(job_id, tenant_id)
+            try:
+                job = await ingestion_service.get_job(job_id, tenant_id)
+            except Exception as e:
+                logger.error(
+                    "job_not_found_in_db",
+                    job_id=job_id,
+                    tenant_id=tenant_id,
+                    error=str(e),
+                    hint="Job may not be committed to DB yet. Check transaction commit in API route."
+                )
+                raise
+            
             document = await doc_service.get_document(job.doc_id, tenant_id)
             
             # Update status to running
@@ -225,12 +236,25 @@ def run_full_pipeline(job_id: str, tenant_id: str) -> Dict[str, Any]:
                 }
     
     # Run async pipeline with proper event loop handling
+    # Always create a new event loop for Celery tasks to avoid thread conflicts
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(_run_pipeline())
-    except RuntimeError:
-        # Fallback to asyncio.run for new loop
+        # Check if we're in a thread with an event loop
+        try:
+            loop = asyncio.get_running_loop()
+            # If we get here, we're in an async context - use asyncio.run
+            raise RuntimeError("Already in async context")
+        except RuntimeError:
+            # Good - no running loop, we can create our own
+            pass
+        
+        # Create fresh event loop for this task
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_run_pipeline())
+        finally:
+            loop.close()
+    except Exception as e:
+        logger.error("event_loop_error", error=str(e))
+        # Last resort: try asyncio.run with new loop
         return asyncio.run(_run_pipeline())

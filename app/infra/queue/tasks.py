@@ -16,7 +16,7 @@ class IngestionTask(Task):
     """Base task with error handling and logging"""
     
     autoretry_for = (Exception,)
-    retry_kwargs = {"max_retries": 3}
+    retry_kwargs = {"max_retries": 3, "countdown": 5}  # Wait 5 seconds before retry
     retry_backoff = True
     retry_backoff_max = 600  # 10 minutes
     retry_jitter = True
