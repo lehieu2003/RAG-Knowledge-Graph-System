@@ -104,8 +104,13 @@ LIMIT $limit
 
 # ============ Graph Traversal ============
 
-TRAVERSE_K_HOP = """
-MATCH path = (anchor:Entity)-[r:RELATION*1..$hop_limit]-(connected:Entity)
+def get_traverse_k_hop_query(hop_limit: int) -> str:
+    """
+    Generate K-hop traversal query with hop_limit injected
+    (Neo4j doesn't allow parameters in variable-length patterns)
+    """
+    return f"""
+MATCH path = (anchor:Entity)-[r:RELATION*1..{hop_limit}]-(connected:Entity)
 WHERE anchor.id IN $anchor_ids
   AND anchor.tenant_id = $tenant_id
   AND connected.tenant_id = $tenant_id
@@ -113,19 +118,19 @@ WHERE anchor.id IN $anchor_ids
 WITH path, relationships(path) as rels, nodes(path) as ns
 WHERE all(rel IN rels WHERE rel.confidence >= $min_confidence)
 RETURN 
-  [n IN ns | {
+  [n IN ns | {{
     id: n.id, 
     name: n.canonical_name, 
     type: n.entity_type
-  }] as entities,
-  [rel IN rels | {
+  }}] as entities,
+  [rel IN rels | {{
     type: rel.type,
     confidence: rel.confidence,
     doc_id: rel.doc_id,
     chunk_id: rel.chunk_id,
     page_start: rel.page_start,
     page_end: rel.page_end
-  }] as relations,
+  }}] as relations,
   length(path) as hop_count
 ORDER BY hop_count, size(rels) DESC
 LIMIT 100

@@ -17,7 +17,8 @@
     "lucide-react": "^0.323.0",
     "clsx": "^2.1.0",
     "react-markdown": "^9.0.1",
-    "date-fns": "^3.3.1"
+    "date-fns": "^3.3.1",
+    "reactflow": "^11.10.4"
   },
   "devDependencies": {
     "@types/react": "^18.2.48",

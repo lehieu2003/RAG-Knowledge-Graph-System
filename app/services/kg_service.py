@@ -69,3 +69,29 @@ class KGService:
     async def initialize_schema(self):
         """Initialize Neo4j constraints (call on startup)"""
         await self.kg_repo.create_constraints()
+    
+    def upsert_knowledge_graph_sync(
+        self,
+        entities: List[Entity],
+        relations: List[Relation],
+        tenant_id: str
+    ) -> Dict[str, int]:
+        """
+        Sync version for Celery tasks
+        Avoids asyncio event loop conflicts in background workers
+        """
+        if not entities and not relations:
+            return {"entities": 0, "relations": 0}
+        
+        logger.info(
+            "kg_upsert_sync_started",
+            entities=len(entities),
+            relations=len(relations),
+            tenant_id=tenant_id
+        )
+        
+        # Batch upsert (sync)
+        result = self.kg_repo.batch_upsert_sync(entities, relations, tenant_id)
+        
+        logger.info("kg_upsert_sync_completed", result=result)
+        return result

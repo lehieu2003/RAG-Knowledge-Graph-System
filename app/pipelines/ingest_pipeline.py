@@ -40,7 +40,7 @@ def run_full_pipeline(job_id: str, tenant_id: str) -> Dict[str, Any]:
     from app.infra.postgres.database import AsyncSessionLocal
     from app.infra.postgres.repos import PostgresDocumentRepository, PostgresChunkRepository, PostgresJobRepository
     from app.infra.neo4j.repo import Neo4jKnowledgeGraphRepository
-    from app.infra.neo4j.driver import init_neo4j, get_driver
+    from app.infra.neo4j.driver import init_neo4j_sync
     from app.infra.index.bm25 import FileBackedBM25Repository
     from app.services.document_service import DocumentService
     from app.services.ingestion_service import IngestionService
@@ -54,12 +54,9 @@ def run_full_pipeline(job_id: str, tenant_id: str) -> Dict[str, Any]:
     import asyncio
     
     async def _run_pipeline():
-        # Ensure Neo4j is initialized
-        try:
-            get_driver()
-        except RuntimeError:
-            logger.info("neo4j_initializing", job_id=job_id)
-            await init_neo4j()
+        # Initialize sync Neo4j driver for Celery tasks (avoids event loop conflicts)
+        init_neo4j_sync()
+        logger.info("neo4j_sync_initialized", job_id=job_id)
         
         async with AsyncSessionLocal() as session:
             # Repos
@@ -187,7 +184,8 @@ def run_full_pipeline(job_id: str, tenant_id: str) -> Dict[str, Any]:
                     job_id, JobStatus.RUNNING, JobStep.UPSERT_GRAPH
                 )
                 
-                kg_result = await kg_service.upsert_knowledge_graph(
+                # Use sync version to avoid asyncio event loop conflicts in Celery
+                kg_result = kg_service.upsert_knowledge_graph_sync(
                     entities, relations, tenant_id
                 )
                 
@@ -236,25 +234,5 @@ def run_full_pipeline(job_id: str, tenant_id: str) -> Dict[str, Any]:
                 }
     
     # Run async pipeline with proper event loop handling
-    # Always create a new event loop for Celery tasks to avoid thread conflicts
-    try:
-        # Check if we're in a thread with an event loop
-        try:
-            loop = asyncio.get_running_loop()
-            # If we get here, we're in an async context - use asyncio.run
-            raise RuntimeError("Already in async context")
-        except RuntimeError:
-            # Good - no running loop, we can create our own
-            pass
-        
-        # Create fresh event loop for this task
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(_run_pipeline())
-        finally:
-            loop.close()
-    except Exception as e:
-        logger.error("event_loop_error", error=str(e))
-        # Last resort: try asyncio.run with new loop
-        return asyncio.run(_run_pipeline())
+    # Use asyncio.run() which handles loop lifecycle correctly for Celery tasks
+    return asyncio.run(_run_pipeline())

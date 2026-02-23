@@ -85,7 +85,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className='max-w-5xl mx-auto h-[calc(100vh-8rem)] flex flex-col'>
+    <div className='flex flex-col'>
       {/* Header */}
       <div className='mb-6'>
         <h1 className='text-3xl font-bold text-gray-900 mb-2'>
@@ -95,7 +95,7 @@ export default function ChatPage() {
       </div>
 
       {/* Mode selector */}
-      <div className='card mb-4'>
+      <div className='card'>
         <label className='block text-sm font-medium text-gray-700 mb-2'>
           Retrieval Mode
         </label>

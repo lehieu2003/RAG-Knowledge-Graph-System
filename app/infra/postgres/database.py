@@ -21,7 +21,8 @@ engine = create_async_engine(
     database_url,
     echo=settings.is_development,
     pool_pre_ping=True,
-    poolclass=NullPool if settings.environment == "test" else None,
+    # Use NullPool to avoid connection pool issues with Celery worker event loops
+    poolclass=NullPool,
 )
 
 # Session factory

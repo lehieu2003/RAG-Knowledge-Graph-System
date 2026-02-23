@@ -1,9 +1,9 @@
 """
 Neo4j driver management
 """
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator
-from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession
+from contextlib import asynccontextmanager, contextmanager
+from typing import AsyncGenerator, Generator
+from neo4j import AsyncGraphDatabase, AsyncDriver, AsyncSession, GraphDatabase, Driver, Session
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -11,8 +11,9 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 settings = get_settings()
 
-# Global driver instance
+# Global driver instances
 _driver: AsyncDriver | None = None
+_sync_driver: Driver | None = None
 
 
 async def init_neo4j() -> AsyncDriver:
@@ -50,6 +51,40 @@ def get_driver() -> AsyncDriver:
     return _driver
 
 
+def init_neo4j_sync() -> Driver:
+    """Initialize sync Neo4j driver for Celery tasks"""
+    global _sync_driver
+    
+    if _sync_driver is None:
+        _sync_driver = GraphDatabase.driver(
+            settings.neo4j_uri,
+            auth=(settings.neo4j_user, settings.neo4j_password),
+            max_connection_lifetime=3600,
+            max_connection_pool_size=50,
+            connection_acquisition_timeout=60,
+        )
+        
+        # Verify connectivity
+        _sync_driver.verify_connectivity()
+        logger.info("neo4j_sync_connected", uri=settings.neo4j_uri)
+    
+    return _sync_driver
+
+
+def close_neo4j_sync():
+    """Close sync Neo4j driver"""
+    global _sync_driver
+    if _sync_driver:
+        _sync_driver.close()
+        logger.info("neo4j_sync_closed")
+        _sync_driver = None
+
+
+def get_sync_driver() -> Driver:
+    """Get sync Neo4j driver (creates if not exists)"""
+    return init_neo4j_sync()
+
+
 @asynccontextmanager
 async def get_neo4j_session() -> AsyncGenerator[AsyncSession, None]:
     """Get Neo4j session (context manager)"""
@@ -59,3 +94,14 @@ async def get_neo4j_session() -> AsyncGenerator[AsyncSession, None]:
             yield session
         finally:
             await session.close()
+
+
+@contextmanager
+def get_neo4j_session_sync() -> Generator[Session, None, None]:
+    """Get sync Neo4j session for Celery tasks"""
+    driver = get_sync_driver()
+    session = driver.session()
+    try:
+        yield session
+    finally:
+        session.close()

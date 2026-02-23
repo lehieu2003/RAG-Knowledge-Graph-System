@@ -10,7 +10,7 @@ from app.domain.ports import KnowledgeGraphRepository
 from app.domain.models import Entity, Relation, GraphPath
 from app.core.logging import get_logger
 from app.core.exceptions import GraphOperationError
-from app.infra.neo4j.driver import get_neo4j_session
+from app.infra.neo4j.driver import get_neo4j_session, get_neo4j_session_sync
 from app.infra.neo4j import cypher
 
 logger = get_logger(__name__)
@@ -182,10 +182,12 @@ class Neo4jKnowledgeGraphRepository(KnowledgeGraphRepository):
         """K-hop traversal from anchor entities"""
         try:
             async with get_neo4j_session() as session:
+                # Generate query with hop_limit injected (Neo4j limitation)
+                query = cypher.get_traverse_k_hop_query(hop_limit)
+                
                 result = await session.run(
-                    cypher.TRAVERSE_K_HOP,
+                    query,
                     anchor_ids=anchor_ids,
-                    hop_limit=hop_limit,
                     tenant_id=tenant_id,
                     min_confidence=min_confidence,
                 )
@@ -278,3 +280,85 @@ class Neo4jKnowledgeGraphRepository(KnowledgeGraphRepository):
                 logger.info("neo4j_constraints_created")
         except Exception as e:
             logger.warning("create_constraints_failed", error=str(e))
+    
+    def batch_upsert_sync(
+        self,
+        entities: List[Entity],
+        relations: List[Relation],
+        tenant_id: str
+    ) -> Dict[str, int]:
+        """
+        Sync version of batch upsert for Celery tasks
+        Avoids asyncio event loop conflicts in background workers
+        """
+        try:
+            with get_neo4j_session_sync() as session:
+                # Batch entities
+                entity_data = [
+                    {
+                        "id": e.id,
+                        "canonical_name": e.canonical_name,
+                        "entity_type": e.entity_type,
+                        "aliases": e.aliases,
+                        "metadata": json.dumps(e.metadata) if e.metadata else "{}",
+                    }
+                    for e in entities
+                ]
+                
+                entity_result = session.run(
+                    cypher.BATCH_UPSERT_ENTITIES,
+                    entities=entity_data,
+                    tenant_id=tenant_id,
+                )
+                entity_record = entity_result.single()
+                entity_count = entity_record["count"]
+                
+                # Batch relations
+                relation_data = [
+                    {
+                        "head_id": r.head_id,
+                        "tail_id": r.tail_id,
+                        "relation_type": r.relation_type,
+                        "confidence": r.confidence,
+                        "extractor": r.extractor.value,
+                        "doc_id": r.doc_id,
+                        "chunk_id": r.chunk_id,
+                        "page_start": r.page_start,
+                        "page_end": r.page_end,
+                        "span": r.span,
+                    }
+                    for r in relations
+                ]
+                
+                relation_result = session.run(
+                    cypher.BATCH_UPSERT_RELATIONS,
+                    relations=relation_data,
+                    tenant_id=tenant_id,
+                )
+                relation_record = relation_result.single()
+                relation_count = relation_record["count"]
+                
+                logger.info(
+                    "graph_batch_upsert_sync",
+                    entities=entity_count,
+                    relations=relation_count,
+                    tenant_id=tenant_id,
+                )
+                
+                return {
+                    "entities": entity_count,
+                    "relations": relation_count,
+                }
+        except Exception as e:
+            logger.error("batch_upsert_sync_failed", error=str(e))
+            raise GraphOperationError("batch_upsert_sync", str(e))
+    
+    def create_constraints_sync(self):
+        """Initialize schema constraints (sync version for Celery)"""
+        try:
+            with get_neo4j_session_sync() as session:
+                for query in cypher.CREATE_CONSTRAINTS:
+                    session.run(query)
+                logger.info("neo4j_constraints_created_sync")
+        except Exception as e:
+            logger.warning("create_constraints_sync_failed", error=str(e))

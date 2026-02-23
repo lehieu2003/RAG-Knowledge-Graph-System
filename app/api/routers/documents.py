@@ -25,7 +25,9 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 async def upload_document(
     file: UploadFile = File(...),
     doc_service: DocumentService = Depends(get_document_service),
-    ingestion_service: IngestionService = Depends(get_ingestion_service),    db: AsyncSession = Depends(get_db),  # Direct session access for commit    user_id: str = Depends(get_current_user_id),
+    ingestion_service: IngestionService = Depends(get_ingestion_service),
+    db: AsyncSession = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
     tenant_id: str = Depends(get_current_tenant_id)
 ):
     """Upload a PDF document and auto-trigger knowledge extraction pipeline"""
